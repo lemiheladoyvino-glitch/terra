@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import random
 from dataclasses import dataclass, field, replace
+from typing import Any
 
 from server.game.entities import Entity, Position
 from server.game.worldgen import Terrain, TerrainKind, generate_island
@@ -42,6 +43,11 @@ class World:
         entity = replace(self.entities[id], position=new_pos)
         self.remove_entity(id)
         self.add_entity(entity)
+
+    def update_entity_fields(self, id: str, **fields: Any) -> None:
+        """Replace kind-specific fields without touching position or spatial buckets."""
+        entity = self.entities[id]
+        self.entities[id] = replace(entity, fields={**entity.fields, **fields})
 
     def query_radius(self, center: Position, radius: float) -> list[Entity]:
         """Inclusive circular query, sorted by ID for deterministic results.

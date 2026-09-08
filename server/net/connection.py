@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from typing import Any
 from uuid import uuid4
 
@@ -29,6 +30,7 @@ class Connection:
         self.registry = registry
         self.send_queue: asyncio.Queue[str] = asyncio.Queue(maxsize=64)
         self.move_intent: dict[str, Any] | None = None
+        self.interact_intent: dict[str, Any] | None = None
         self.aoi_radius = 20
         self.known_records: dict[str, dict[str, Any]] = {}
         self.sent_chunks: set[tuple[int, int]] = set()
@@ -76,9 +78,14 @@ class Connection:
             if message["t"] == "move":
                 direction = message.get("direction")
                 self.move_intent = None if direction == {"x": 0, "y": 0} else message
+            elif message["t"] == "interact":
+                self.interact_intent = message
             # Other valid intents have no gameplay effects yet.
 
-    async def run(self, tick: int, *, world_size: int, chunk_size: int, seed: int) -> None:
+    async def run(
+        self, tick: int, *, world_size: int, chunk_size: int, seed: int,
+        on_welcome: Callable[[], None] | None = None,
+    ) -> None:
         # The endpoint accepts and adds the player before calling run.
         self.registry.register(self)
         try:
@@ -87,6 +94,8 @@ class Connection:
                 "world_size": world_size, "chunk_size": chunk_size, "seed": seed,
                 "config": {"movement_hz": 10, "sim_hz": 1, "aoi_radius": self.aoi_radius},
             })
+            if on_welcome is not None:
+                on_welcome()
             async with asyncio.TaskGroup() as group:
                 group.create_task(self._send_loop())
                 group.create_task(self._watch_close())

@@ -5,6 +5,19 @@ import math
 from typing import TYPE_CHECKING, Any
 
 from server.game.entities import MOVE_SPEED, Entity, Position
+from server.game.survival import (
+    BERRY_HUNGER,
+    GRAVE_TTL,
+    HUNGER_DECAY,
+    INTERACT_RANGE,
+    STARVE_DAMAGE,
+    ItemStack,
+    PlayerState,
+    add_item,
+    damage_tool,
+    find_tool,
+    serialize_inventory,
+)
 from server.game.world import World
 from server.game.worldgen import CHUNK_SIZE, TerrainKind
 from server.net.protocol import SCHEMA_VERSION, ProtocolError, encode, encode_chunk_rle
@@ -24,6 +37,8 @@ class Simulation:
         self.world = world
         self.registry = registry
         self.spawn_position = self._find_spawn()
+        self.players: dict[str, PlayerState] = {}
+        self.graves: dict[str, list[ItemStack]] = {}
 
     def _find_spawn(self) -> Position:
         terrain = self.world.terrain
@@ -46,9 +61,22 @@ class Simulation:
             {"name": f"Wanderer-{connection.id[:4]}", "hp": 100},
         ))
 
+        state = PlayerState()
+        add_item(state, "wooden-axe", 1)
+        add_item(state, "wooden-pickaxe", 1)
+        self.players[connection.id] = state
+
+    def send_inventory(self, connection: Connection) -> None:
+        """Send the initial inventory after welcome, or a changed inventory thereafter."""
+        self._enqueue(connection, {"t": "inventory", "v": SCHEMA_VERSION,
+                                   "tick": self.world.tick_count,
+                                   "slots": serialize_inventory(self.players[connection.id])})
+
     def remove_player(self, connection: Connection) -> None:
         if connection.id in self.world.entities:
             self.world.remove_entity(connection.id)
+        self.players.pop(connection.id, None)
+        connection.interact_intent = None
         connection.move_intent = None
         connection.known_records.clear()
         connection.sent_chunks.clear()
@@ -58,14 +86,128 @@ class Simulation:
         connections = tuple(self.registry.connections.values())
         for connection in connections:
             if not connection.closing and connection.id in self.world.entities:
-                self._move(connection)
+                intent = connection.interact_intent
+                connection.interact_intent = None
+                if intent is not None:
+                    self._interact(connection, intent)
+                if not connection.closing:
+                    self._move(connection)
         self.world.tick_count += 1
         for connection in connections:
             if not connection.closing and connection.id in self.world.entities:
                 self._stream(connection)
 
     def sim_tick(self) -> None:
-        """Reserved for 1 Hz village/world simulation in E4."""
+        self._survival_tick()
+        self._village_tick()
+
+    def _village_tick(self) -> None:
+        pass  # E4 owns this
+
+    def _invalid_interact(self, connection: Connection, message: str) -> None:
+        self._enqueue(connection, {"t": "error", "v": SCHEMA_VERSION,
+                                   "code": "invalid_intent", "message": message})
+
+    def _interact(self, connection: Connection, intent: dict[str, Any]) -> None:
+        action = intent["action"]
+        if action in {"trade", "craft"}:
+            return
+        target = self.world.entities.get(intent["target"].get("entity_id"))
+        player = self.world.entities[connection.id]
+        if target is None or math.dist(player.position, target.position) > INTERACT_RANGE:
+            self._invalid_interact(connection, "target missing or out of range")
+            return
+        state = self.players[connection.id]
+        if action in {"chop", "mine"}:
+            kind, tool, item = ("tree", "axe", "wood") if action == "chop" else (
+                "rock", "pickaxe", "stone"
+            )
+            if target.kind != kind or target.fields["resource_remaining"] <= 0:
+                self._invalid_interact(connection, "invalid resource target")
+                return
+            slot = find_tool(state, tool)
+            if slot is None:
+                self._invalid_interact(connection, f"no {tool}")
+                return
+            # Reject a full inventory before consuming a resource or tool use.
+            if add_item(state, item, 1):
+                self._invalid_interact(connection, "inventory full")
+                return
+            stack = state.inventory[slot]
+            assert stack is not None
+            tool_id = stack["item_id"]
+            self._deplete(target)
+            if damage_tool(state, slot):
+                self._enqueue(connection, {"t": "event", "v": SCHEMA_VERSION,
+                                           "tick": self.world.tick_count,
+                                           "event": "tool_broke", "item_id": tool_id})
+            self.send_inventory(connection)
+        elif action == "eat" and target.kind == "berry-bush":
+            if target.fields["resource_remaining"] <= 0:
+                self._invalid_interact(connection, "empty berry bush")
+                return
+            self._deplete(target)
+            state.hunger = min(100, state.hunger + BERRY_HUNGER)
+        elif action == "pickup" and target.kind == "grave" and target.id in self.graves:
+            leftovers: list[ItemStack] = []
+            for stack in self.graves[target.id]:
+                qty = add_item(state, stack["item_id"], stack["quantity"],
+                               durability=stack["durability"])
+                if qty:
+                    leftovers.append({**stack, "quantity": qty})
+            if leftovers:
+                self.graves[target.id] = leftovers
+            else:
+                self.graves.pop(target.id)
+                self.world.remove_entity(target.id)
+            self.send_inventory(connection)
+        else:
+            self._invalid_interact(connection, "invalid interaction target")
+
+    def _deplete(self, entity: Entity) -> None:
+        remaining = entity.fields["resource_remaining"] - 1
+        if remaining <= 0:
+            self.world.remove_entity(entity.id)
+        else:
+            self.world.update_entity_fields(entity.id, resource_remaining=remaining)
+
+    def _survival_tick(self) -> None:
+        for connection in tuple(self.registry.connections.values()):
+            state = self.players.get(connection.id)
+            if state is None or connection.closing:
+                continue
+            state.hunger = max(0, state.hunger - HUNGER_DECAY)
+            if state.hunger == 0:
+                state.hp = max(0, state.hp - STARVE_DAMAGE)
+            elif state.hunger > 50 and 0 < state.hp < 100:
+                state.hp = min(100, state.hp + 1)
+            if state.hp == 0:
+                self._die(connection, state)
+            if self.world.entities[connection.id].fields["hp"] != state.hp:
+                self.world.update_entity_fields(connection.id, hp=state.hp)
+        for grave_id in list(self.graves):
+            grave = self.world.entities.get(grave_id)
+            if grave is None or grave.fields["expires_tick"] <= self.world.tick_count:
+                self.graves.pop(grave_id)
+                if grave is not None:
+                    self.world.remove_entity(grave_id)
+
+    def _die(self, connection: Connection, state: PlayerState) -> None:
+        player = self.world.entities[connection.id]
+        grave_id = f"grave:{connection.id}:{self.world.tick_count}"
+        self.world.add_entity(Entity(grave_id, "grave", player.position,
+                                     {"owner_id": connection.id,
+                                      "expires_tick": self.world.tick_count + GRAVE_TTL}))
+        self.graves[grave_id] = [stack for stack in state.inventory if stack is not None]
+        state.inventory = [None] * len(state.inventory)
+        state.hp = state.hunger = 100
+        connection.move_intent = None
+        connection.interact_intent = None
+        self.world.move_entity(connection.id, self.spawn_position)
+        self._enqueue(connection, {"t": "event", "v": SCHEMA_VERSION,
+                                   "tick": self.world.tick_count,
+                                   "event": "you_died", "grave_id": grave_id})
+        self.send_inventory(connection)
 
     def _move(self, connection: Connection) -> None:
         intent = connection.move_intent
@@ -131,6 +273,8 @@ class Simulation:
         return end
 
     def _enqueue(self, connection: Connection, message: dict[str, Any]) -> bool:
+        if connection.closing:
+            return False
         try:
             raw = encode(message)
             connection.send_queue.put_nowait(raw)

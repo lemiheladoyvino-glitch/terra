@@ -103,6 +103,11 @@ def test_app_transport_and_cleanup() -> None:
                         return message
                 raise AssertionError(f"did not receive {kind}")
 
+            inventory = decode(socket.receive_text())
+            assert inventory["t"] == "inventory"
+            assert {slot["item_id"] for slot in inventory["slots"]} == {
+                "wooden-axe", "wooden-pickaxe",
+            }
             first_chunk = decode(socket.receive_text())
             assert first_chunk["t"] == "chunk"
             snapshot = receive_until("snapshot")

@@ -52,6 +52,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             world_size=world.terrain.size,
             chunk_size=CHUNK_SIZE,
             seed=world.terrain.seed,
+            on_welcome=lambda: app.state.simulation.send_inventory(connection),
         )
     finally:
         app.state.simulation.remove_player(connection)
