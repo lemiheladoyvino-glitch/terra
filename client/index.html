@@ -4,10 +4,44 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Terra</title>
-  <style>body { margin: 0; background: #18231c; } canvas { display: block; }</style>
+  <style>
+    html, body, #game { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body { background: #16324a; color: #f0eee5; font: 12px/1.6 system-ui, sans-serif; }
+    canvas { display: block; }
+    #hud {
+      position: fixed; top: 12px; left: 12px; z-index: 10; pointer-events: none;
+      padding: 10px 14px; background: rgb(15 26 29 / 82%); border-radius: 6px;
+      font-variant-numeric: tabular-nums;
+    }
+    #hud strong { font-size: 14px; margin-right: 12px; }
+    #status { color: #d5ddc5; }
+    #hud dl { display: grid; grid-template-columns: auto auto; gap: 0 16px; margin: 6px 0; }
+    #hud dt, #hud p { color: #aebcaf; }
+    #hud dd { margin: 0; text-align: right; }
+    #hud p { margin: 0; font-size: 11px; }
+    #connection-overlay {
+      position: fixed; inset: 0; z-index: 20; display: grid; place-items: center;
+      background: rgb(10 20 29 / 55%); pointer-events: none;
+    }
+    #connection-overlay[hidden] { display: none; }
+    #connection-message { padding: 18px 24px; border-radius: 6px; background: #182b36; font-size: 15px; }
+  </style>
 </head>
 <body>
+  <div id="game" aria-label="Terra island. Move using WASD or arrow keys."></div>
+  <aside id="hud" aria-label="World status">
+    <strong>Terra</strong><span id="status" role="status">Connecting…</span>
+    <dl>
+      <dt>Tile</dt><dd id="position">—, —</dd>
+      <dt>Visible entities</dt><dd id="entity-count">0</dd>
+      <dt>Server tick</dt><dd id="server-tick">—</dd>
+    </dl>
+    <p>WASD / arrow keys to walk</p>
+  </aside>
+  <div id="connection-overlay" role="status">
+    <span id="connection-message">Connecting to Terra…</span>
+  </div>
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.90.0/dist/phaser.min.js"></script>
-  <script src="/js/main.js"></script>
+  <script type="module" src="/js/main.js"></script>
 </body>
 </html>

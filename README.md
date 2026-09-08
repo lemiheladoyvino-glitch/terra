@@ -16,22 +16,28 @@ python -m pip install -r requirements-dev.txt
 uvicorn server.app:app --reload
 ```
 
-Open http://127.0.0.1:8000 for the 800×600 placeholder grid; the browser console
-logs `welcome`. Loading Phaser requires internet access to jsDelivr. `/healthz`
+Open http://127.0.0.1:8000 and walk with WASD or arrow keys. Open a second tab
+to see another player. The canvas resizes to the window; the HUD shows connection,
+tile position, visible entities, and server tick. Loading Phaser requires internet access to jsDelivr. `/healthz`
 returns `{"status":"ok"}`. Runtime-only installs use `requirements.txt`.
 
 ```sh
 pytest
 ruff check .
+node --test client/js/*.test.mjs
 ```
+
+The client uses plain ES modules without a build step or npm dependencies. Node.js
+is only needed for the RLE unit test.
 
 Run from the repo root. One uvicorn process is one world; do not use multiple
 workers. Reload regenerates the seed-42 island and resources. There is no database,
 auth, or persistence. Connections create players at a shared deterministic spawn;
 disconnect removes them. The 10 Hz hook integrates movement and streams terrain
 chunks plus AOI snapshots/deltas; the 1 Hz hook is reserved for future simulation.
-Non-movement intents are validated and ignored. The browser remains the placeholder
-grid until E1.3; it does not yet render streamed state or send movement intents.
+Non-movement intents are validated and ignored. The browser caches terrain chunks,
+interpolates remote entities by 200 ms, and predicts local movement. Disconnection
+clears client state and retries every second with a new player.
 
 The loop runs independently of connections, starts with app lifespan, and stops on
 shutdown. Delayed scheduling catches up every tick. Simulation sends never block:
@@ -58,7 +64,14 @@ terra/
       connection.py        # Registry, receive loop, bounded send queue
   client/
     index.html
-    js/main.js             # WebSocket and empty Phaser grid
+    package.json           # ES module mode for Node's built-in test runner
+    js/
+      constants.js         # Shared tile scale, palette, timing, movement constants
+      main.js              # Phaser scene, keyboard input, DOM HUD
+      net.js               # WebSocket dispatch, deduplicated moves, reconnect
+      render.js            # Chunk/entity visuals, interpolation, prediction
+      rle.js               # Strict terrain chunk decoder
+      rle.test.mjs         # Node built-in unit tests
   tests/
     test_protocol.py       # Codec, documented examples, transport smoke test
     test_loop.py           # Virtual-clock counts, catch-up, lifecycle
