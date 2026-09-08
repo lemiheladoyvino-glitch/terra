@@ -19,12 +19,19 @@ from server.net.connection import Connection, ConnectionRegistry
 
 SEED = 42
 SAVE_INTERVAL = 30
+SHUTDOWN_SAVE_TIMEOUT = 10
 logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    db_path = Path(os.environ.get("TERRA_DB", "./terra.db")).resolve()
+    configured_path = os.environ.get("TERRA_DB", "./terra.db")
+    db_path = Path(configured_path).resolve()
+    is_default = db_path == Path("./terra.db").resolve()
+    logger.info("TERRA_DB=%s (default=%s)", db_path, is_default)
+    if is_default:
+        logger.warning("Default TERRA_DB is non-durable on most hosts; "
+                       "set TERRA_DB to a persistent path")
     snapshot = load_world(db_path)
     if snapshot is not None:
         app.state.world = World.from_snapshot(snapshot)
@@ -74,17 +81,38 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await app.state.loop.stop()
         finally:
             stop_saving.set()
-            await save_task  # Wait for an in-flight write; never overlap the final save.
-            await app.state.simulation.flush_player_saves()
-            await save_current()
+            async def finish_saving() -> None:
+                await save_task
+                await app.state.simulation.flush_player_saves()
+                await save_current()
+
+            # Keep transaction ordering: cancelling a thread await cannot stop disk I/O.
+            final_save = asyncio.create_task(finish_saving(), name="terra-final-save")
+            app.state.shutdown_save_task = final_save
+            try:
+                await asyncio.wait_for(asyncio.shield(final_save), SHUTDOWN_SAVE_TIMEOUT)
+            except TimeoutError:
+                logger.error(
+                    "Shutdown save did not finish within %s seconds", SHUTDOWN_SAVE_TIMEOUT,
+                )
+
+                def report_completion(task: asyncio.Task[None]) -> None:
+                    if not task.cancelled() and task.exception() is not None:
+                        logger.error("Deferred shutdown save failed", exc_info=task.exception())
+
+                final_save.add_done_callback(report_completion)
+            except Exception:
+                logger.exception("Shutdown save failed; retaining previous durable snapshots")
 
 
 app = FastAPI(title="Terra", lifespan=lifespan)
 
 
 @app.get("/healthz")
-async def healthz() -> dict[str, str]:
-    return {"status": "ok"}
+async def healthz() -> dict[str, str | int]:
+    world = app.state.world
+    return {"status": "ok", "tick": world.tick_count,
+            "entities": len(world.entities), "villages": len(world.villages)}
 
 
 @app.websocket("/ws")

@@ -1,0 +1,14 @@
+.venv
+__pycache__
+*.pyc
+*.db*
+*.sqlite3*
+.pytest_cache
+.ruff_cache
+tests
+.git
+node_modules
+**/node_modules
+npm-debug.log
+client/js/*.test.mjs
+.DS_Store

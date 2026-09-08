@@ -87,7 +87,11 @@ def test_entity_kinds(kind: str) -> None:
 def test_app_transport_and_cleanup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TERRA_DB", str(tmp_path / "transport.db"))
     with TestClient(app) as client:
-        assert client.get("/healthz").json() == {"status": "ok"}
+        health = client.get("/healthz").json()
+        assert health["status"] == "ok"
+        assert isinstance(health["tick"], int) and health["tick"] >= 0
+        assert health["entities"] == len(app.state.world.entities)
+        assert health["villages"] == len(app.state.world.villages)
         assert "phaser@3.90.0" in client.get("/").text
         assert client.get("/js/main.js").status_code == 200
         with client.websocket_connect("/ws") as socket:
