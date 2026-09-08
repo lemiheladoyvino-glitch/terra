@@ -48,6 +48,14 @@
     .toast { background: rgb(22 32 32 / 95%); border: 1px solid #7b7458; border-radius: 5px; padding: 9px 15px; text-align: center; overflow-wrap: anywhere; }
     .toast.dim { color: #bac3bd; border-color: #44514a; }
     @media (max-width: 760px) { #inventory { grid-template-columns: repeat(8, 36px); } .inventory-slot { width: 36px; } .item-icon { left: 5px; } .durability { width: 28px; } #toasts { top: 180px; } }
+    #crafting-panel { position: fixed; right: 14px; top: 14px; z-index: 14; width: min(310px, calc(100vw - 28px)); max-height: calc(100vh - 150px); overflow: auto; padding: 14px; box-sizing: border-box; border-radius: 7px; background: rgb(15 26 29 / 95%); }
+    #crafting-panel h2 { margin: 0 0 4px; font-size: 16px; }
+    #crafting-panel p { margin: 0 0 10px; color: #aebcaf; }
+    #crafting-rows { display: grid; gap: 6px; }
+    .recipe { display: grid; gap: 2px; width: 100%; text-align: left; padding: 8px; color: #ffe7b1; background: #344737; border: 1px solid #859470; border-radius: 4px; cursor: pointer; font: inherit; }
+    .recipe strong { text-transform: capitalize; }
+    .recipe:disabled { color: #a5ada5; background: #232f29; border-color: #3b463f; cursor: default; }
+    .recipe:not(:disabled):hover, .recipe:focus-visible { outline: 2px solid #d4c69a; }
   </style>
 </head>
 <body>
@@ -61,8 +69,9 @@
     </dl>
     <div class="vital"><label for="hp-bar">HP</label><progress id="hp-bar" max="100" value="0"></progress><output id="hp-value">—</output></div>
     <div class="vital"><label for="hunger-bar">Hunger</label><progress id="hunger-bar" max="100" value="0"></progress><output id="hunger-value">—</output></div>
-    <p>WASD / arrows to walk · click outlined resources</p>
+    <p>WASD / arrows to walk · click outlined resources · C to craft</p>
   </aside>
+  <section id="crafting-panel" aria-label="Crafting" hidden><h2>Crafting</h2><p>C to close · armor is cosmetic</p><div id="crafting-rows"></div></section>
   <div id="inventory" role="list" aria-label="Inventory, 16 slots"></div>
   <div id="toasts" role="status" aria-live="polite"></div>
   <div id="connection-overlay" role="status">

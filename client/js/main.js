@@ -2,6 +2,7 @@ import { TERRAIN_PALETTE, TILE_PX } from "./constants.js";
 import { Network } from "./net.js";
 import { WorldRenderer } from "./render.js";
 import { SurvivalUI } from "./survival-ui.js";
+import { CraftingUI } from "./crafting-ui.js";
 import { pickInteractable } from "./interact.js";
 
 const statusElement = document.querySelector("#status");
@@ -18,6 +19,7 @@ function boot() {
       window.terra.scene = this;
       this.world = new WorldRenderer(this);
       this.survivalUI = new SurvivalUI();
+      this.craftingUI = new CraftingUI((id) => this.net.sendCraft(id));
       this.heldKeys = new Set();
       this.connected = false;
       this.net = new Network({
@@ -28,7 +30,10 @@ function boot() {
         chunk: (message) => this.world.chunk(message),
         snapshot: (message, receivedAt) => this.world.snapshot(message, receivedAt),
         delta: (message, receivedAt) => this.world.delta(message, receivedAt),
-        inventory: (message) => this.survivalUI.setInventory(message.slots),
+        inventory: (message) => {
+          this.survivalUI.setInventory(message.slots);
+          this.craftingUI.setInventory(message.slots);
+        },
         vitals: (message) => this.survivalUI.setVitals(message),
         event: (message) => this.survivalUI.event(message),
         error: (message) => {
@@ -44,6 +49,7 @@ function boot() {
       }, () => {
         this.world.reset();
         this.survivalUI.reset();
+        this.craftingUI.reset();
         this.heldKeys.clear();
         this.updateHud();
       });
@@ -58,6 +64,11 @@ function boot() {
       };
       this.input.on("pointerdown", interact);
       const keyDown = (event) => {
+        if (event.code === "KeyC") {
+          event.preventDefault();
+          if (!event.repeat && !document.hidden && this.connected) this.craftingUI.toggle();
+          return;
+        }
         if (!MOVEMENT_KEYS.has(event.code)) return;
         event.preventDefault();
         if (!document.hidden && this.connected) this.heldKeys.add(event.code);
@@ -99,6 +110,7 @@ function boot() {
         this.net.stop();
         this.world.reset();
         this.survivalUI.reset();
+        this.craftingUI.reset();
       });
       this.net.connect();
     }
@@ -123,6 +135,7 @@ function boot() {
       this.net.sendMove(direction); // Network deduplicates; no per-frame wire traffic.
       // Avoid a huge local step after tab suspension; authoritative updates resume it.
       this.world.update(performance.now(), Math.min(delta, 100), direction);
+      this.craftingUI.update(this.world);
       this.updateHud();
     }
   }

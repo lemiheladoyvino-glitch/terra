@@ -1,4 +1,7 @@
 const ITEMS = {
+  "stone-axe": { name: "Stone axe", color: "#92969b", glyph: "🪓", tool: true },
+  "stone-pickaxe": { name: "Stone pickaxe", color: "#92969b", glyph: "⛏", tool: true },
+  "padded-armor": { name: "Padded armor", color: "#c7b8a1", glyph: "♜" },
   wood: { name: "Wood", color: "#946442", glyph: "▰" },
   stone: { name: "Stone", color: "#92969b", glyph: "◆" },
   berries: { name: "Berries", color: "#c4549e", glyph: "●" },

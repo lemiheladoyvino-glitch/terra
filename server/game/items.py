@@ -13,6 +13,9 @@ class ItemKind(StrEnum):
     BERRIES = "berries"
     WOODEN_AXE = "wooden-axe"
     WOODEN_PICKAXE = "wooden-pickaxe"
+    STONE_AXE = "stone-axe"
+    STONE_PICKAXE = "stone-pickaxe"
+    PADDED_ARMOR = "padded-armor"
 
 
 @dataclass(frozen=True)
@@ -21,6 +24,7 @@ class ItemSpec:
     max_stack: int
     max_durability: int | None = None
     tool: str | None = None
+    equip: str | None = None  # Cosmetic until combat exists; no equipment effects yet.
 
 
 ITEMS: dict[str, ItemSpec] = {
@@ -29,4 +33,7 @@ ITEMS: dict[str, ItemSpec] = {
     ItemKind.BERRIES: ItemSpec(True, 99),
     ItemKind.WOODEN_AXE: ItemSpec(False, 1, AXE_DURABILITY, "axe"),
     ItemKind.WOODEN_PICKAXE: ItemSpec(False, 1, PICKAXE_DURABILITY, "pickaxe"),
+    ItemKind.STONE_AXE: ItemSpec(False, 1, 90, "axe"),
+    ItemKind.STONE_PICKAXE: ItemSpec(False, 1, 90, "pickaxe"),
+    ItemKind.PADDED_ARMOR: ItemSpec(False, 1, equip="armor"),
 }

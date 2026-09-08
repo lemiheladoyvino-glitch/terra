@@ -31,6 +31,7 @@ class Connection:
         self.send_queue: asyncio.Queue[str] = asyncio.Queue(maxsize=64)
         self.move_intent: dict[str, Any] | None = None
         self.interact_intent: dict[str, Any] | None = None
+        self.craft_intent: dict[str, Any] | None = None
         self.aoi_radius = 20
         self.known_records: dict[str, dict[str, Any]] = {}
         self.sent_chunks: set[tuple[int, int]] = set()
@@ -80,6 +81,8 @@ class Connection:
                 self.move_intent = None if direction == {"x": 0, "y": 0} else message
             elif message["t"] == "interact":
                 self.interact_intent = message
+            elif message["t"] == "craft":
+                self.craft_intent = message
             # Other valid intents have no gameplay effects yet.
 
     async def run(

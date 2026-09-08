@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import math
+from copy import deepcopy
 from typing import TYPE_CHECKING, Any
 
 from server.game.entities import MOVE_SPEED, Entity, Position
 from server.game.movement import traverse
+from server.game.recipes import RECIPES, WORKBENCH_RANGE, can_craft
 from server.game.survival import (
     BERRY_HUNGER,
     GRAVE_TTL,
@@ -15,6 +17,7 @@ from server.game.survival import (
     ItemStack,
     PlayerState,
     add_item,
+    consume_item,
     damage_tool,
     find_tool,
     serialize_inventory,
@@ -90,6 +93,7 @@ class Simulation:
         self.players.pop(connection.id, None)
         self.last_vitals.pop(connection.id, None)
         connection.interact_intent = None
+        connection.craft_intent = None
         connection.move_intent = None
         connection.known_records.clear()
         connection.sent_chunks.clear()
@@ -103,6 +107,10 @@ class Simulation:
                 connection.interact_intent = None
                 if intent is not None:
                     self._interact(connection, intent)
+                craft = connection.craft_intent
+                connection.craft_intent = None
+                if craft is not None and not connection.closing:
+                    self._craft(connection, craft)
                 if not connection.closing:
                     self._move(connection)
         self.world.tick_count += 1
@@ -178,6 +186,48 @@ class Simulation:
         else:
             self._invalid_interact(connection, "invalid interaction target")
 
+    def _tile_occupied(self, position: Position) -> bool:
+        tile = tuple(map(math.floor, position))
+        center = (tile[0] + 0.5, tile[1] + 0.5)
+        return any(entity.kind in {"building", "road", "workbench"}
+                   and tuple(map(math.floor, entity.position)) == tile
+                   for entity in self.world.query_radius(center, 1))
+
+    def _craft(self, connection: Connection, intent: dict[str, Any]) -> None:
+        recipe = RECIPES.get(intent["recipe_id"])
+        if recipe is None:
+            self._invalid_interact(connection, "unknown recipe")
+            return
+        position = self.world.entities[connection.id].position
+        near_workbench = any(entity.kind == "building"
+                             and entity.fields.get("building_type") == "workbench"
+                             for entity in self.world.query_radius(position, WORKBENCH_RANGE))
+        state = self.players[connection.id]
+        reason = can_craft(state, recipe, near_workbench)
+        if reason:
+            self._invalid_interact(connection, reason)
+            return
+        if recipe.places_entity:
+            if self._tile_occupied(position):
+                self._invalid_interact(connection, "tile occupied")
+                return
+        else:
+            # Fit is checked against inventory BEFORE consuming inputs, as specified.
+            trial = deepcopy(state)
+            if add_item(trial, recipe.output_id, recipe.output_qty):
+                self._invalid_interact(connection, "inventory full")
+                return
+        for item_id, qty in recipe.inputs.items():
+            consume_item(state, item_id, qty)
+        if recipe.places_entity:
+            center = (math.floor(position[0]) + 0.5, math.floor(position[1]) + 0.5)
+            self.world.add_entity(Entity(f"workbench:{connection.id}:{self.world.tick_count}",
+                                         "building", center,
+                                         {"building_type": recipe.places_entity, "hp": 100}))
+        else:
+            add_item(state, recipe.output_id, recipe.output_qty)
+        self.send_inventory(connection)
+
     def _deplete(self, entity: Entity) -> None:
         remaining = entity.fields["resource_remaining"] - 1
         if remaining <= 0:
@@ -218,6 +268,7 @@ class Simulation:
         state.hp = state.hunger = 100
         connection.move_intent = None
         connection.interact_intent = None
+        connection.craft_intent = None
         self.world.move_entity(connection.id, self.spawn_position)
         self._enqueue(connection, {"t": "event", "v": SCHEMA_VERSION,
                                    "tick": self.world.tick_count,

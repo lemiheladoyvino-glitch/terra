@@ -89,6 +89,11 @@ export class Network {
     }));
   }
 
+  sendCraft(recipeId) {
+    if (!this.welcome || this.socket?.readyState !== WebSocket.OPEN) return;
+    this.socket.send(JSON.stringify({ t: "craft", v: SCHEMA_VERSION, recipe_id: recipeId }));
+  }
+
   stop() {
     this.stopped = true;
     clearTimeout(this.timer);
