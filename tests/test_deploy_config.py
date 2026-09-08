@@ -21,9 +21,10 @@ def test_deploy_configs() -> None:
     assert "--log-config log_config.yaml" in service["startCommand"]
     assert service["numInstances"] == 1
     assert service["healthCheckPath"] == "/healthz"
-    assert service["disk"] == {"name": "terra-data", "mountPath": "/data", "sizeGB": 1}
+    assert service["plan"] == "free"
+    assert "disk" not in service
     env = {entry["key"]: entry["value"] for entry in service["envVars"]}
-    assert env["TERRA_DB"] == "/data/terra.db"
+    assert env["TERRA_DB"] == "/tmp/terra.db"
     assert (ROOT / "runtime.txt").read_text().strip() == f'python-{env["PYTHON_VERSION"]}'
     config = yaml.safe_load((ROOT / "log_config.yaml").read_text())
     assert config["loggers"]["server"]["level"] == "INFO"

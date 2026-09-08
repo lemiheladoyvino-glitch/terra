@@ -1,4 +1,5 @@
 FROM python:3.12.14-slim
+# The Render free Blueprint overrides TERRA_DB to ephemeral /tmp/terra.db.
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PORT=8000 TERRA_DB=/data/terra.db
 WORKDIR /app
 COPY requirements.txt .

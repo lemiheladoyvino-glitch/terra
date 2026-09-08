@@ -1,23 +1,20 @@
-# Free services sleep after ~15 minutes idle: the world does not simulate while
-# asleep (villages stop), and resumes from its last snapshot on wake.
-# A truly continuous world requires an always-on paid instance. Persistent disks
-# also require a paid service; this Blueprint therefore uses Starter.
+# Free tier has no persistent disk. SQLite lives on the container's ephemeral
+# filesystem and is LOST on every redeploy and on wake from ~15-minute idle sleep.
+# Each deploy starts a fresh World.new(SEED); the world does not simulate asleep.
+# Upgrade: Starter + a persistent disk at /data, with TERRA_DB=/data/terra.db,
+# for a durable world. Always use one process, one worker, and one instance.
 services:
   - type: web
     name: terra
     runtime: python
-    plan: starter
+    plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn server.app:app --host 0.0.0.0 --port $PORT --workers 1 --no-access-log --log-config log_config.yaml
     healthCheckPath: /healthz
     # Never increase this: a second instance creates a divergent world.
     numInstances: 1
-    disk:
-      name: terra-data
-      mountPath: /data
-      sizeGB: 1
     envVars:
       - key: TERRA_DB
-        value: /data/terra.db
+        value: /tmp/terra.db
       - key: PYTHON_VERSION
         value: 3.12.14

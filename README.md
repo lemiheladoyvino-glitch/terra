@@ -5,8 +5,8 @@ FastAPI native WebSockets, asyncio, and a static Phaser 3.90.0 browser client.
 Read [PROTOCOL.md](PROTOCOL.md) before extending the transport.
 
 **Deployment requires exactly one process, one worker, and one instance.**
-A second replica creates a divergent world. Set `TERRA_DB` to durable storage
-or restarts/redeploys can lose the world. See [Deploy to Render](#deploy-to-render).
+A second replica creates a divergent world. The Render free Blueprint is ephemeral:
+the world resets on redeploy and idle-sleep wake. See [Deploy to Render](#deploy-to-render).
 
 ## Install and run
 
@@ -123,32 +123,29 @@ Never use `--workers 2`, Gunicorn multi-worker mode, or autoscaling replicas:
 each process owns a separate in-memory world and asyncio GameLoop, so a second
 process creates a divergent world.
 
-**`TERRA_DB` MUST point at durable storage.** The default `./terra.db` is
-non-durable on most hosts; redeploying can erase both the world and player identities.
-The Blueprint mounts a persistent disk at `/data` and uses `/data/terra.db`.
+**The free-tier world is ephemeral.** There is no persistent disk; SQLite lives
+at `/tmp/terra.db` on the container filesystem. The world and player identities
+are lost on every redeploy and on wake from the roughly 15-minute idle sleep.
+Each deploy starts a fresh `World.new(SEED)`. Villages do not advance while asleep.
+This is suitable for playtesting mechanics, but is NOT the persistent shared world.
 
 1. Push this repository to GitHub.
 2. In Render choose **New > Blueprint** and select the repository's `render.yaml`.
-3. Confirm one Starter web service, one instance, the `terra-data` disk mounted
-   at `/data` (1 GB), and the environment variables below. Do not enable scaling.
+3. Confirm one free web service, one instance, no disk, and the environment
+   variables below. Do not enable scaling.
 4. Deploy and check `/healthz` and the startup logs for the resolved database path
    and the new/resumed world message.
 
-Persistent disks require a paid service, which is why this Blueprint uses Starter.
-Free services sleep after about 15 minutes idle: the world and villages do not
-advance while asleep. With durable storage, waking resumes the last snapshot;
-an always-on paid instance is required for continuous simulation.
-
-| Variable | Production value | Purpose |
+| Variable | Render free value | Purpose |
 | --- | --- | --- |
-| `TERRA_DB` | `/data/terra.db` | Durable SQLite world and player storage |
+| `TERRA_DB` | `/tmp/terra.db` | Writable, ephemeral SQLite world and player storage |
 | `PYTHON_VERSION` | `3.12.14` | Native Render Python runtime (also pinned in `runtime.txt`) |
 | `PORT` | Supplied by Render | HTTP/WebSocket listening port |
 
 Local production-parity run (after activating the venv):
 
 ```sh
-export TERRA_DB="$PWD/terra.db"
+export TERRA_DB=/tmp/terra.db
 export PORT=8000
 uvicorn server.app:app --host 0.0.0.0 --port "$PORT" --workers 1 --no-access-log --log-config log_config.yaml
 ```
@@ -158,11 +155,19 @@ Logs go to stdout; application INFO messages include startup and persistence log
 Render terminates TLS and proxies WebSockets. The client already chooses `wss://`
 when the page uses HTTPS; no client change or application TLS certificate is needed.
 
-The alternative Dockerfile uses the same runtime and command as a non-root user.
+**Upgrade for a durable world:** change `plan` to `starter`, add a persistent
+`terra-data` disk mounted at `/data` (1 GB), and set `TERRA_DB=/data/terra.db`.
+Keep one worker and one instance. Durable storage preserves snapshots across
+redeploys; an always-on paid service lets the world simulate continuously.
+Upgrading cannot recover state already lost from the free container filesystem.
+
+The alternative Dockerfile keeps `/data/terra.db` as its durable-storage default
+and uses the same runtime and command as a non-root user.
 Mount durable storage at `/data` and make it writable by UID 10001; publish port
 8000 (or set `PORT`). Run exactly one container replica.
 
-Inspect or back up from a host shell with the SQLite CLI installed:
+After upgrading (or with durable Docker storage), inspect or back up from a host
+shell with the SQLite CLI installed:
 
 ```sh
 sqlite3 /data/terra.db "SELECT key, length(value), updated_at FROM kv WHERE key='world';"
@@ -174,7 +179,8 @@ separate durable storage. Player rows contain bearer credentials, so keep backup
 private and avoid dumping player keys into logs. Restore with the service stopped.
 World autosaves run every 30 seconds. Shutdown stops the loop and gives outstanding
 player/world saves up to 10 seconds; failures/timeouts are logged and the previous
-snapshots remain. A disk thread cannot be forcibly cancelled by Python; the host's
+snapshots remain on the current filesystem; free-tier filesystem loss still erases
+them. A disk thread cannot be forcibly cancelled by Python; the host's
 SIGTERM grace limit is the final bound on process exit.
 
 Run the temporary-database production smoke test using the repo venv:
