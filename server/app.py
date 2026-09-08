@@ -45,6 +45,11 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     world = app.state.world
     connection = Connection(websocket, app.state.registry)
     await websocket.accept()
+
+    def on_welcome() -> None:
+        app.state.simulation.send_inventory(connection)
+        app.state.simulation.send_vitals(connection)
+
     try:
         app.state.simulation.add_player(connection)
         await connection.run(
@@ -52,7 +57,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             world_size=world.terrain.size,
             chunk_size=CHUNK_SIZE,
             seed=world.terrain.seed,
-            on_welcome=lambda: app.state.simulation.send_inventory(connection),
+            on_welcome=on_welcome,
         )
     finally:
         app.state.simulation.remove_player(connection)

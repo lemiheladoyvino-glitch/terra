@@ -1,6 +1,8 @@
-import { TERRAIN_PALETTE } from "./constants.js";
+import { TERRAIN_PALETTE, TILE_PX } from "./constants.js";
 import { Network } from "./net.js";
 import { WorldRenderer } from "./render.js";
+import { SurvivalUI } from "./survival-ui.js";
+import { pickInteractable } from "./interact.js";
 
 const statusElement = document.querySelector("#status");
 const positionElement = document.querySelector("#position");
@@ -15,6 +17,7 @@ function boot() {
     create() {
       window.terra.scene = this;
       this.world = new WorldRenderer(this);
+      this.survivalUI = new SurvivalUI();
       this.heldKeys = new Set();
       this.connected = false;
       this.net = new Network({
@@ -25,7 +28,13 @@ function boot() {
         chunk: (message) => this.world.chunk(message),
         snapshot: (message, receivedAt) => this.world.snapshot(message, receivedAt),
         delta: (message, receivedAt) => this.world.delta(message, receivedAt),
-        error: (message) => console.warn("Terra server error", message.code, message.message),
+        inventory: (message) => this.survivalUI.setInventory(message.slots),
+        vitals: (message) => this.survivalUI.setVitals(message),
+        event: (message) => this.survivalUI.event(message),
+        error: (message) => {
+          if (message.code === "invalid_intent") this.survivalUI.toast(message.message, true);
+          else console.warn("Terra server error", message.code, message.message);
+        },
       }, (status) => {
         this.connected = status === "connected";
         statusElement.textContent = status === "connected" ? "Connected" : status === "connecting" ? "Connecting…" : "Disconnected";
@@ -34,9 +43,20 @@ function boot() {
         if (status === "disconnected") overlayMessage.textContent = "Disconnected — reconnecting";
       }, () => {
         this.world.reset();
+        this.survivalUI.reset();
         this.heldKeys.clear();
         this.updateHud();
       });
+      const interact = (pointer) => {
+        if (!this.connected || document.hidden || !pointer.leftButtonDown()) return;
+        const point = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+        const result = pickInteractable(
+          Array.from(this.world.entities.values(), (view) => view.record),
+          { x: point.x / TILE_PX, y: point.y / TILE_PX }, this.world.predicted,
+        );
+        if (result) this.net.sendInteract(result.entityId, result.action);
+      };
+      this.input.on("pointerdown", interact);
       const keyDown = (event) => {
         if (!MOVEMENT_KEYS.has(event.code)) return;
         event.preventDefault();
@@ -75,8 +95,10 @@ function boot() {
         window.removeEventListener("keyup", keyUp);
         window.removeEventListener("blur", release);
         document.removeEventListener("visibilitychange", visibility);
+        this.input.off("pointerdown", interact);
         this.net.stop();
         this.world.reset();
+        this.survivalUI.reset();
       });
       this.net.connect();
     }

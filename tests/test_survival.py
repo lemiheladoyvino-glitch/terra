@@ -163,6 +163,7 @@ def test_survival_decay_damage_regen_and_dispatch(setup: tuple[Simulation, Conne
     sim.world.add_entity(village)
     for _ in range(99):
         sim.sim_tick()
+        drain(connection)  # Emulate a live client consuming its private vitals.
     assert state.hunger == 1 and state.hp == 100
     sim.sim_tick()
     assert state.hunger == 0 and state.hp == 98
@@ -204,7 +205,7 @@ def test_death_and_pickup(setup: tuple[Simulation, Connection]) -> None:
     assert sim.world.entities[connection.id].fields["hp"] == 100
     assert sim.world.entities[connection.id].position == sim.spawn_position
     messages = drain(connection)
-    assert [m["t"] for m in messages] == ["event", "inventory"]
+    assert [m["t"] for m in messages] == ["event", "inventory", "vitals"]
     assert messages[0]["event"] == "you_died" and messages[0]["grave_id"] == grave_id
     assert messages[1]["slots"] == []
     sim.world.move_entity(connection.id, death_position)
@@ -254,8 +255,8 @@ def test_latest_interact_is_queued() -> None:
     class Socket:
         def __init__(self) -> None:
             self.messages = iter([
-                {"t": "interact", "v": 2, "action": "chop", "target": {"entity_id": "a"}},
-                {"t": "interact", "v": 2, "action": "mine", "target": {"entity_id": "b"}},
+                {"t": "interact", "v": 3, "action": "chop", "target": {"entity_id": "a"}},
+                {"t": "interact", "v": 3, "action": "mine", "target": {"entity_id": "b"}},
             ])
 
         async def receive_text(self) -> str:
@@ -284,3 +285,49 @@ def test_zero_hp_dies_instead_of_regenerating(setup: tuple[Simulation, Connectio
     assert state.hp == state.hunger == 100
     assert len(sim.graves) == 1
     assert drain(connection)[0]["event"] == "you_died"
+
+
+def test_vitals_owner_only_and_send_on_change(setup: tuple[Simulation, Connection]) -> None:
+    sim, connection = setup
+    other = Connection(None, sim.registry)
+    other.id = "other"
+    sim.add_player(other)
+    sim.registry.register(other)
+    sim.send_vitals(connection)
+    assert drain(connection) == [{"t": "vitals", "v": 3, "hp": 100, "hunger": 100}]
+    assert drain(other) == []
+    sim.send_vitals(connection)
+    assert drain(connection) == []
+    sim._survival_tick()
+    assert drain(connection) == [{"t": "vitals", "v": 3, "hp": 100, "hunger": 99}]
+    assert drain(other) == [{"t": "vitals", "v": 3, "hp": 100, "hunger": 99}]
+    sim.send_vitals(connection)
+    assert drain(connection) == []
+    resource(sim, "berry-bush")
+    sim.players[connection.id].hunger = 80
+    messages = interact(sim, connection, "eat")
+    assert next(m for m in messages if m["t"] == "vitals")["hunger"] == 88
+    drain(other)
+    sim.players[connection.id].hp = 0
+    sim.players[connection.id].hunger = 0
+    sim._survival_tick()
+    assert drain(connection)[-1] == {"t": "vitals", "v": 3, "hp": 100, "hunger": 100}
+    sim.remove_player(connection)
+    assert connection.id not in sim.last_vitals
+
+
+def test_unchanged_survival_vitals_and_failed_enqueue(setup: tuple[Simulation, Connection]) -> None:
+    sim, connection = setup
+    # At 0 hunger/2 HP, this tick dies and resets to the already-sent full values.
+    sim.send_vitals(connection)
+    drain(connection)
+    sim.players[connection.id].hp = 2
+    sim.players[connection.id].hunger = 0
+    sim._survival_tick()
+    assert all(m["t"] != "vitals" for m in drain(connection))
+    sim.players[connection.id].hunger = 90
+    for _ in range(connection.send_queue.maxsize):
+        connection.send_queue.put_nowait("full")
+    sim.send_vitals(connection)
+    assert connection.closing
+    assert sim.last_vitals[connection.id] == (100, 100)

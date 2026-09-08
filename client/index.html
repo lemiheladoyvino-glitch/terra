@@ -25,6 +25,29 @@
     }
     #connection-overlay[hidden] { display: none; }
     #connection-message { padding: 18px 24px; border-radius: 6px; background: #182b36; font-size: 15px; }
+    .vital { display: grid; grid-template-columns: 48px 1fr 50px; gap: 6px; align-items: center; }
+    .vital output { text-align: right; font-variant-numeric: tabular-nums; }
+    progress { appearance: none; border: 0; border-radius: 3px; overflow: hidden; background: #263337; }
+    progress::-webkit-progress-bar { background: #263337; }
+    progress::-webkit-progress-value { background: var(--bar-color); }
+    progress::-moz-progress-bar { background: var(--bar-color); }
+    .vital progress { width: 100px; height: 8px; }
+    #hp-bar { --bar-color: #cb666b; }
+    #hunger-bar { --bar-color: #d6a44c; }
+    #inventory {
+      position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); z-index: 12;
+      display: grid; grid-template-columns: repeat(16, 42px); gap: 4px;
+      padding: 7px; border-radius: 7px; background: rgb(15 26 29 / 88%);
+    }
+    .inventory-slot { width: 42px; height: 48px; position: relative; background: #283631; border-radius: 3px; }
+    .slot-index { position: absolute; top: 0; left: 3px; font-size: 8px; color: #9baaa1; }
+    .item-icon { position: absolute; top: 10px; left: 8px; width: 25px; height: 25px; border-radius: 3px; text-align: center; line-height: 25px; font-size: 19px; color: #f4e6ce; }
+    .item-quantity { position: absolute; bottom: 7px; right: 3px; font-size: 11px; font-weight: 600; text-shadow: 0 1px 3px #000; }
+    .durability { position: absolute; bottom: 3px; left: 4px; width: 34px; height: 3px; --bar-color: #bdd19c; }
+    #toasts { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 15; display: grid; gap: 6px; pointer-events: none; max-width: min(420px, 90vw); }
+    .toast { background: rgb(22 32 32 / 95%); border: 1px solid #7b7458; border-radius: 5px; padding: 9px 15px; text-align: center; overflow-wrap: anywhere; }
+    .toast.dim { color: #bac3bd; border-color: #44514a; }
+    @media (max-width: 760px) { #inventory { grid-template-columns: repeat(8, 36px); } .inventory-slot { width: 36px; } .item-icon { left: 5px; } .durability { width: 28px; } #toasts { top: 180px; } }
   </style>
 </head>
 <body>
@@ -36,8 +59,12 @@
       <dt>Visible entities</dt><dd id="entity-count">0</dd>
       <dt>Server tick</dt><dd id="server-tick">—</dd>
     </dl>
-    <p>WASD / arrow keys to walk</p>
+    <div class="vital"><label for="hp-bar">HP</label><progress id="hp-bar" max="100" value="0"></progress><output id="hp-value">—</output></div>
+    <div class="vital"><label for="hunger-bar">Hunger</label><progress id="hunger-bar" max="100" value="0"></progress><output id="hunger-value">—</output></div>
+    <p>WASD / arrows to walk · click outlined resources</p>
   </aside>
+  <div id="inventory" role="list" aria-label="Inventory, 16 slots"></div>
+  <div id="toasts" role="status" aria-live="polite"></div>
   <div id="connection-overlay" role="status">
     <span id="connection-message">Connecting to Terra…</span>
   </div>

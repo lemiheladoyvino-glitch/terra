@@ -166,7 +166,7 @@ def test_aoi_lifecycle_and_tick_order() -> None:
     fourth = tick(sim, a)
     assert set(fourth[-1]["left"]) == {"b", "tree"}
     fifth = tick(sim, a)
-    assert fifth == [{"t": "delta", "v": 2, "tick": 5,
+    assert fifth == [{"t": "delta", "v": 3, "tick": 5,
                       "entered": [], "left": [], "changed": []}]
     batches = [first, second, third, fourth, fifth]
     assert [[m["t"] for m in batch if m["t"] != "chunk"] for batch in batches] == [

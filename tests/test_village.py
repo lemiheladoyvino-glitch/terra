@@ -90,7 +90,7 @@ def test_build_roads_cost_and_wire() -> None:
     assert roads
     assert len({e.position for e in roads + village.buildings}) == len(roads) + 1
     assert all(sim.world.terrain.walkable(*map(int, e.position)) for e in roads)
-    message = {'t': 'snapshot', 'v': 2, 'tick': 0, 'entities': records(sim.world)}
+    message = {'t': 'snapshot', 'v': 3, 'tick': 0, 'entities': records(sim.world)}
     assert decode(encode(message)) == message
 
 

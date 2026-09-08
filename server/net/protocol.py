@@ -5,7 +5,7 @@ import math
 from enum import StrEnum
 from typing import Any
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 CHUNK_SIZE = 32
 MAX_MESSAGE_BYTES = 65_536
 
@@ -21,6 +21,7 @@ class MessageType(StrEnum):
     SNAPSHOT = "snapshot"
     DELTA = "delta"
     INVENTORY = "inventory"
+    VITALS = "vitals"
     EVENT = "event"
     ERROR = "error"
 
@@ -59,6 +60,7 @@ SCHEMAS: dict[str, Any] = {
     "snapshot": {"tick": "uint", "entities": ["entity"]},
     "delta": {"tick": "uint", "entered": ["entity"], "left": ["id"], "changed": ["entity"]},
     "inventory": {"tick": "uint", "slots": [({"slot": "uint", **ITEM})]},
+    "vitals": {"hp": "vital", "hunger": "vital"},
     "event": (
         {"tick": "uint", "event": "tool_broke", "item_id": "id"},
         {"tick": "uint", "event": "you_died", "grave_id": "id"},
@@ -107,6 +109,7 @@ def _validate(value: Any, schema: Any) -> None:
         "fraction": number and 0 <= value <= 1,
         "int": type(value) is int,
         "uint": type(value) is int and value >= 0,
+        "vital": type(value) is int and 0 <= value <= 100,
         "positive_int": type(value) is int and value > 0,
         "id": isinstance(value, str) and 1 <= len(value) <= 128,
         "text": isinstance(value, str) and 1 <= len(value) <= 2048,

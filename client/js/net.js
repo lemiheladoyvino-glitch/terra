@@ -1,6 +1,6 @@
 import { SCHEMA_VERSION } from "./constants.js";
 
-const INBOUND = new Set(["welcome", "chunk", "snapshot", "delta", "inventory", "event", "chat", "error"]);
+const INBOUND = new Set(["welcome", "chunk", "snapshot", "delta", "inventory", "vitals", "event", "chat", "error"]);
 
 export class Network {
   constructor(handlers, onStatus, onReset) {
@@ -80,6 +80,13 @@ export class Network {
     if (this.lastDirection?.x === direction.x && this.lastDirection?.y === direction.y) return;
     this.socket.send(JSON.stringify({ t: "move", v: SCHEMA_VERSION, direction }));
     this.lastDirection = { ...direction };
+  }
+
+  sendInteract(entityId, action) {
+    if (!this.welcome || this.socket?.readyState !== WebSocket.OPEN) return;
+    this.socket.send(JSON.stringify({
+      t: "interact", v: SCHEMA_VERSION, target: { entity_id: entityId }, action,
+    }));
   }
 
   stop() {

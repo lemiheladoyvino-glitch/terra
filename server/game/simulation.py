@@ -40,6 +40,7 @@ class Simulation:
         self.spawn_position = self._find_spawn()
         self.players: dict[str, PlayerState] = {}
         self.graves: dict[str, list[ItemStack]] = {}
+        self.last_vitals: dict[str, tuple[int, int]] = {}
 
     def _find_spawn(self) -> Position:
         terrain = self.world.terrain
@@ -73,10 +74,21 @@ class Simulation:
                                    "tick": self.world.tick_count,
                                    "slots": serialize_inventory(self.players[connection.id])})
 
+    def send_vitals(self, connection: Connection) -> None:
+        """Private owner state; cache only a successfully enqueued update."""
+        state = self.players[connection.id]
+        vitals = (state.hp, state.hunger)
+        if self.last_vitals.get(connection.id) == vitals:
+            return
+        if self._enqueue(connection, {"t": "vitals", "v": SCHEMA_VERSION,
+                                      "hp": state.hp, "hunger": state.hunger}):
+            self.last_vitals[connection.id] = vitals
+
     def remove_player(self, connection: Connection) -> None:
         if connection.id in self.world.entities:
             self.world.remove_entity(connection.id)
         self.players.pop(connection.id, None)
+        self.last_vitals.pop(connection.id, None)
         connection.interact_intent = None
         connection.move_intent = None
         connection.known_records.clear()
@@ -149,6 +161,7 @@ class Simulation:
                 return
             self._deplete(target)
             state.hunger = min(100, state.hunger + BERRY_HUNGER)
+            self.send_vitals(connection)
         elif action == "pickup" and target.kind == "grave" and target.id in self.graves:
             leftovers: list[ItemStack] = []
             for stack in self.graves[target.id]:
@@ -186,6 +199,7 @@ class Simulation:
                 self._die(connection, state)
             if self.world.entities[connection.id].fields["hp"] != state.hp:
                 self.world.update_entity_fields(connection.id, hp=state.hp)
+            self.send_vitals(connection)
         for grave_id in list(self.graves):
             grave = self.world.entities.get(grave_id)
             if grave is None or grave.fields["expires_tick"] <= self.world.tick_count:

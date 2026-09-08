@@ -3,6 +3,7 @@ import {
   SNAP_DISTANCE, CORRECTION_MS, COLLISION_EPSILON, TERRAIN_PALETTE,
 } from "./constants.js";
 import { decodeChunkRle } from "./rle.js";
+import { INTERACTIONS, inInteractRange } from "./interact.js";
 
 const PALETTE = TERRAIN_PALETTE.map((color) => Number.parseInt(color.slice(1), 16));
 
@@ -99,7 +100,14 @@ export class WorldRenderer {
       }).setOrigin(0.5, 1);
       object.add(label);
     }
-    const view = { record, object, label, samples: [] };
+    let highlight = null;
+    if (Object.hasOwn(INTERACTIONS, record.kind)) {
+      highlight = this.scene.add.graphics();
+      highlight.lineStyle(1.5, 0xffe5a3, 0.7).strokeCircle(0, 0, 13);
+      highlight.setVisible(false);
+      object.addAt(highlight, 0);
+    }
+    const view = { record, object, label, highlight, samples: [] };
     this.entities.set(record.id, view);
     this.sample(view, time);
     if (own) this.reconcile(record.position);
@@ -226,6 +234,7 @@ export class WorldRenderer {
     this.correction.y *= decay;
     const renderTime = this.serverTime(now) - INTERP_DELAY_MS;
     for (const [id, view] of this.entities) {
+      view.highlight?.setVisible(inInteractRange(view.record, this.predicted));
       const own = id === this.metadata.entityId;
       const position = own && this.predicted ? {
         x: this.predicted.x + this.correction.x,
