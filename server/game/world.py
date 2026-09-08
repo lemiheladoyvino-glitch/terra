@@ -6,6 +6,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 from server.game.entities import Entity, Position
+from server.game.village import Village, seed_villages
 from server.game.worldgen import Terrain, TerrainKind, generate_island
 
 BUCKET_SIZE = 16
@@ -16,6 +17,7 @@ class World:
     terrain: Terrain
     entities: dict[str, Entity] = field(default_factory=dict, init=False)
     tick_count: int = 0
+    villages: list[Village] = field(default_factory=list)
     _buckets: dict[tuple[int, int], set[str]] = field(default_factory=dict, init=False, repr=False)
 
     @staticmethod
@@ -96,4 +98,5 @@ class World:
                     continue
                 world.add_entity(Entity(f"{kind}:{x}:{y}", kind, (x + 0.5, y + 0.5),
                                         {"resource_remaining": remaining}))
+        seed_villages(world)
         return world

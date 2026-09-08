@@ -45,8 +45,10 @@ def test_resources() -> None:
         "rock": {TerrainKind.ROCK, TerrainKind.SAND, TerrainKind.GRASS},
         "berry-bush": {TerrainKind.GRASS, TerrainKind.FOREST_FLOOR},
     }
-    assert {e.kind for e in world.entities.values()} == set(ranges)
+    assert {e.kind for e in world.entities.values()} == set(ranges) | {"villager"}
     for entity in world.entities.values():
+        if entity.kind == "villager":
+            continue
         x, y = entity.position
         tx, ty = int(x), int(y)
         assert (x, y) == (tx + 0.5, ty + 0.5)
