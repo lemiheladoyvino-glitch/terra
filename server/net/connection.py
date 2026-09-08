@@ -28,6 +28,26 @@ class Connection:
         self.websocket = websocket
         self.registry = registry
         self.send_queue: asyncio.Queue[str] = asyncio.Queue(maxsize=64)
+        self.move_intent: dict[str, Any] | None = None
+        self.aoi_radius = 20
+        self.known_records: dict[str, dict[str, Any]] = {}
+        self.sent_chunks: set[tuple[int, int]] = set()
+        self.bootstrapped = False
+        self.closing = False
+        self._close_code = 1000
+        self._close_requested = asyncio.Event()
+
+    def close_soon(self, code: int) -> None:
+        """Wake the TaskGroup-owned close watcher without blocking the tick."""
+        if not self.closing:
+            self.closing = True
+            self._close_code = code
+            self._close_requested.set()
+
+    async def _watch_close(self) -> None:
+        await self._close_requested.wait()
+        # Unwind both I/O loops before sending the close frame in run's finally.
+        raise WebSocketDisconnect(self._close_code)
 
     async def send(self, message: dict[str, Any]) -> None:
         await self.send_queue.put(encode(message))
@@ -53,21 +73,29 @@ class Connection:
                     "code": "invalid_message", "message": str(exc)[:2048],
                 })
                 continue
-            # Intents are validated but intentionally have no gameplay effects.
+            if message["t"] == "move":
+                direction = message.get("direction")
+                self.move_intent = None if direction == {"x": 0, "y": 0} else message
+            # Other valid intents have no gameplay effects yet.
 
     async def run(self, tick: int, *, world_size: int, chunk_size: int, seed: int) -> None:
-        await self.websocket.accept()
+        # The endpoint accepts and adds the player before calling run.
         self.registry.register(self)
         try:
             await self.send({
                 "t": "welcome", "v": SCHEMA_VERSION, "entity_id": self.id, "tick": tick,
                 "world_size": world_size, "chunk_size": chunk_size, "seed": seed,
-                "config": {"movement_hz": 10, "sim_hz": 1, "aoi_radius": 20},
+                "config": {"movement_hz": 10, "sim_hz": 1, "aoi_radius": self.aoi_radius},
             })
             async with asyncio.TaskGroup() as group:
                 group.create_task(self._send_loop())
+                group.create_task(self._watch_close())
                 await self._recv_loop()
         except* WebSocketDisconnect:
             pass
         finally:
-            self.registry.unregister(self)
+            try:
+                if self.closing:
+                    await self.websocket.close(code=self._close_code)
+            finally:
+                self.registry.unregister(self)

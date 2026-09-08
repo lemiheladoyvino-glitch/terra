@@ -1,8 +1,8 @@
 # Terra WebSocket protocol — schema 2
 
-This document defines the MVP wire contract. Terrain generation, resource entities, spatial indexing, and wire validation are
-implemented. Terrain/AOI streaming and movement integration are deferred to E1.2.
-Valid intents have no effects; authentication and persistence are not implemented.
+This document defines the MVP wire contract. Terrain generation, resources, player lifecycle, movement integration, and
+terrain/entity AOI streaming are implemented. Other valid intents have no effects;
+authentication and persistence are not implemented.
 The example values are illustrative, not game balance decisions.
 
 ## Transport and validation
@@ -23,7 +23,9 @@ positive x is east and positive y south. Tile coordinates are integers.
 Both directions use the same codec; connection handlers enforce direction.
 Invalid incoming messages receive `error` with code `invalid_message`; the socket
 remains open. The codec does not perform authorization or world-state validation.
-The server has a bounded queue of 64 outgoing messages; producers wait for space.
+The server has a bounded queue of 64 outgoing messages. The connection recv/reply
+path awaits space; the simulation tick uses non-blocking sends and drops a
+connection that cannot keep up (close 1011).
 
 Bump the schema integer for any wire field, type, allowed value, or semantic
 change (including additions, since objects are closed). Deploy matching clients
@@ -38,6 +40,8 @@ v1 messages.
 - Clarified movement at `MOVE_SPEED = 4.0` tiles/sec, collision stops, own-player
   authoritative deltas, and local prediction/reconciliation; move fields are unchanged.
 - Schema is now 2; closed-object validation and mandatory bumps for additions remain.
+- E1.2 clarification (no wire change): recv/reply sends await queue space; simulation
+  sends never block and close slow connections with 1011.
 
 ## Client intents
 
@@ -53,7 +57,7 @@ log it. The skeleton does not require hello or authenticate tokens.
 [-1,1]; the server normalizes a nonzero vector, and (0,0) stops movement. A target
 requests movement toward a world position. The latest intent replaces the previous
 one, applied at the next movement tick. `MOVE_SPEED = 4.0` tiles/sec (defined in
-`server/game/entities.py`); integration is deferred to E1.2. The server moves at
+`server/game/entities.py`). The server moves at
 most MOVE_SPEED / movement_hz tiles per tick, normalizes direction including
 diagonals, and clamps target movement to avoid overshooting. Treat entities as
 points; check every tile crossed by a movement segment, stopping at the last
@@ -101,8 +105,8 @@ connected players whose AOI contains the sender at send time, including the send
 `tick` is world time in movement ticks, starting at zero: seconds = tick / 10.
 Rates are fixed at integer 10 and 1; AOI radius is a server-owned positive number in tiles, currently 20.
 `world_size` is a positive integer tile width/height, `chunk_size` is exactly 32,
-and `seed` is an integer. The MVP island is 192×192. Tick remains zero until tick
-integration in E1.2; connecting player IDs are still placeholders.
+and `seed` is an integer. The MVP island is 192×192. Tick advances once per movement tick, including when nobody is connected.
+The entity ID identifies the live player created before welcome.
 
 ```json
 {"t":"welcome","v":2,"entity_id":"player-1","tick":120,"world_size":192,"chunk_size":32,"seed":42,"config":{"movement_hz":10,"sim_hz":1,"aoi_radius":20}}
@@ -185,7 +189,7 @@ text in both success and failure cases.
 `error` reports a rejected message/intent. Codes use the ID string format; clients
 must tolerate new code values and display `message` as text. MVP meanings are
 `invalid_message`, `unauthorized`, `invalid_intent`, and `not_implemented`.
-The skeleton emits only `invalid_message`; valid intents are silently ignored.
+The server emits only `invalid_message`; valid non-movement intents are silently ignored.
 
 ```json
 {"t":"error","v":2,"code":"invalid_message","message":"unknown message type"}
@@ -223,13 +227,14 @@ and retained members whose serialized fields differ change. Send at most one del
 per movement tick, including an empty delta when unchanged, to advance client time.
 A teleport uses the same membership comparison. Changes outside AOI are not sent.
 A snapshot must fit the message limit; population/radius must be bounded by the
-future server implementation. Splitting an oversized snapshot or delta across multiple frames is not defined;
+server implementation. Splitting an oversized snapshot or delta across multiple
+frames is not defined;
 do not silently truncate one. If a state message cannot fit, close with 1009.
 The `chunk` message streams static terrain, not entity state.
 
 The loop uses monotonic elapsed time, an integer nanosecond accumulator, 10 Hz
 movement and 1 Hz simulation. Every tenth movement tick runs simulation afterward.
-No elapsed time is discarded during catch-up. The future world counter increments
+No elapsed time is discarded during catch-up. The world counter increments
 once per movement tick; the world continues ticking with zero connections. Tick
 values are logical time, not Unix timestamps. No wall-clock values are transmitted.
 
@@ -251,7 +256,7 @@ time, then relevant `chunk` messages, a fresh `snapshot`, and `inventory`. Inval
 and close code 1008. A new authorized connection replaces the old connection for
 that player (old socket closes with 1000). Disconnection does not pause the world.
 Never replay unacknowledged intents automatically: they may have already executed.
-There is no delta-history resume or offline event replay. In this skeleton every
-connection gets a new placeholder UUID immediately; token resume is not implemented.
+There is no delta-history resume or offline event replay. Each connection currently creates a new player with a fresh UUID at the cached
+spawn point; disconnect removes that player. Token resume is not implemented.
 
 Kingdoms, war, and jobs are explicitly out of scope.

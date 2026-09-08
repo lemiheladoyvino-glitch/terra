@@ -93,14 +93,39 @@ def test_app_transport_and_cleanup() -> None:
             welcome = decode(socket.receive_text())
             assert welcome["t"] == "welcome"
             assert welcome["entity_id"] in app.state.registry.connections
+            player_id = welcome["entity_id"]
+            assert player_id in app.state.world.entities
+
+            def receive_until(kind: str) -> dict[str, Any]:
+                for _ in range(100):
+                    message = decode(socket.receive_text())
+                    if message["t"] == kind:
+                        return message
+                raise AssertionError(f"did not receive {kind}")
+
+            first_chunk = decode(socket.receive_text())
+            assert first_chunk["t"] == "chunk"
+            snapshot = receive_until("snapshot")
+            own = next(e for e in snapshot["entities"] if e["id"] == player_id)
+            assert own["kind"] == "player"
+            socket.send_json({"t": "move", "v": 2, "direction": {"x": 1, "y": 0}})
+            for _ in range(10):
+                delta = receive_until("delta")
+                assert delta["tick"] > snapshot["tick"]
+                if any(e["id"] == player_id for e in delta["changed"]):
+                    break
+            else:
+                raise AssertionError("player movement was not streamed")
+            socket.send_json({"t": "move", "v": 2, "direction": {"x": 0, "y": 0}})
             socket.send_json({"t": "hello", "v": 2, "token": "anything"})
             socket.send_json(welcome)
-            assert decode(socket.receive_text())["code"] == "invalid_message"
+            assert receive_until("error")["code"] == "invalid_message"
             socket.send_bytes(b"binary")
-            assert decode(socket.receive_text())["t"] == "error"
+            assert receive_until("error")["code"] == "invalid_message"
         # A following request yields to connection cleanup on the server event loop.
         client.get("/healthz")
         assert not app.state.registry.connections
+        assert player_id not in app.state.world.entities
     assert app.state.loop._task is None
 
 

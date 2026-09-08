@@ -26,11 +26,17 @@ ruff check .
 ```
 
 Run from the repo root. One uvicorn process is one world; do not use multiple
-workers. Reload restarts the placeholder world. There is no database, auth,
-persistence, or gameplay yet. Valid intents are validated and ignored. Both loop
-hooks are empty, so the placeholder world's tick remains zero. The loop runs
-independently of connections, starts with app lifespan, and stops on shutdown.
-Its synchronous hooks must not block; delayed scheduling catches up every tick.
+workers. Reload regenerates the seed-42 island and resources. There is no database,
+auth, or persistence. Connections create players at a shared deterministic spawn;
+disconnect removes them. The 10 Hz hook integrates movement and streams terrain
+chunks plus AOI snapshots/deltas; the 1 Hz hook is reserved for future simulation.
+Non-movement intents are validated and ignored. The browser remains the placeholder
+grid until E1.3; it does not yet render streamed state or send movement intents.
+
+The loop runs independently of connections, starts with app lifespan, and stops on
+shutdown. Delayed scheduling catches up every tick. Simulation sends never block:
+a full outgoing queue closes that connection with 1011; oversized state closes
+with 1009. The recv/reply path still waits for queue space.
 
 ## Layout
 
@@ -42,7 +48,10 @@ terra/
     game/
       __init__.py
       loop.py              # 10 Hz / 1 Hz fixed-tick accumulator
-      world.py             # Entity dictionary and tick placeholder
+      world.py             # Terrain, entities, spatial index, tick counter
+      worldgen.py          # Deterministic island and terrain chunks
+      entities.py          # Entity records and movement speed
+      simulation.py        # Player lifecycle, movement, AOI streaming
     net/
       __init__.py
       protocol.py          # Strict JSON codec and schema constants
@@ -53,6 +62,8 @@ terra/
   tests/
     test_protocol.py       # Codec, documented examples, transport smoke test
     test_loop.py           # Virtual-clock counts, catch-up, lifecycle
+    test_worldgen.py       # Generation, spatial index, snapshot size
+    test_simulation.py     # Movement, AOI/chunks, lifecycle, backpressure
   PROTOCOL.md
   README.md
   requirements.txt

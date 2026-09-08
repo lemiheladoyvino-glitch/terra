@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 Position = tuple[float, float]
-MOVE_SPEED = 4.0  # Tiles per second; integration is deferred to E1.2.
+MOVE_SPEED = 4.0  # Authoritative movement speed in tiles per second.
 
 
 @dataclass(frozen=True)
