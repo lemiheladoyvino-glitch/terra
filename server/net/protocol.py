@@ -5,7 +5,8 @@ import math
 from enum import StrEnum
 from typing import Any
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+CHUNK_SIZE = 32
 MAX_MESSAGE_BYTES = 65_536
 
 
@@ -16,6 +17,7 @@ class MessageType(StrEnum):
     CRAFT = "craft"
     CHAT = "chat"
     WELCOME = "welcome"
+    CHUNK = "chunk"
     SNAPSHOT = "snapshot"
     DELTA = "delta"
     INVENTORY = "inventory"
@@ -51,7 +53,9 @@ SCHEMAS: dict[str, Any] = {
     },
     "craft": {"recipe_id": "id"},
     "chat": ({"text": "text"}, {"text": "text", "sender_id": "id", "tick": "uint"}),
-    "welcome": {"entity_id": "id", "tick": "uint", "config": CONFIG},
+    "welcome": {"entity_id": "id", "tick": "uint", "config": CONFIG,
+                "world_size": "positive_int", "chunk_size": "chunk_size", "seed": "int"},
+    "chunk": {"cx": "int", "cy": "int", "size": "chunk_size", "tiles": "rle"},
     "snapshot": {"tick": "uint", "entities": ["entity"]},
     "delta": {"tick": "uint", "entered": ["entity"], "left": ["id"], "changed": ["entity"]},
     "inventory": {"tick": "uint", "slots": [({"slot": "uint", **ITEM})]},
@@ -85,6 +89,9 @@ def _validate(value: Any, schema: Any) -> None:
         for item in value:
             _validate(item, schema[0])
         return
+    if schema == "rle":
+        decode_chunk_rle(value)
+        return
     if schema == "entity":
         if not isinstance(value, dict) or not isinstance(value.get("kind"), str):
             raise ProtocolError("invalid entity")
@@ -106,6 +113,7 @@ def _validate(value: Any, schema: Any) -> None:
         "bool": type(value) is bool,
         "ten": type(value) is int and value == 10,
         "one": type(value) is int and value == 1,
+        "chunk_size": type(value) is int and value == CHUNK_SIZE,
         "action": isinstance(value, str)
         and value in {"chop", "mine", "eat", "trade", "craft", "pickup"},
     }
@@ -171,3 +179,36 @@ def decode(raw: str) -> dict[str, Any]:
         return _message(json.loads(raw, object_pairs_hook=_object))
     except (TypeError, ValueError, OverflowError, RecursionError) as exc:
         raise ProtocolError(str(exc)) from exc
+
+
+def decode_chunk_rle(runs: list[list[int]]) -> bytes:
+    """Validate exactly 1024 tiles before expanding; IDs are terrain ordinals 0..5."""
+    if not isinstance(runs, list) or not 1 <= len(runs) <= CHUNK_SIZE ** 2:
+        raise ProtocolError("invalid chunk RLE")
+    total = 0
+    for run in runs:
+        if (not isinstance(run, list) or len(run) != 2
+                or type(run[0]) is not int or run[0] <= 0
+                or type(run[1]) is not int or not 0 <= run[1] <= 5):
+            raise ProtocolError("invalid chunk run")
+        total += run[0]
+        if total > CHUNK_SIZE ** 2:
+            raise ProtocolError("chunk RLE exceeds 1024 tiles")
+    if total != CHUNK_SIZE ** 2:
+        raise ProtocolError("chunk RLE must contain 1024 tiles")
+    return bytes(tile for length, tile in runs for _ in range(length))
+
+
+def encode_chunk_rle(tiles: bytes) -> list[list[int]]:
+    """Encode a 32x32 row-major byte grid into maximal [length, tile_id] runs."""
+    if not isinstance(tiles, bytes) or len(tiles) != CHUNK_SIZE ** 2:
+        raise ProtocolError("chunk must contain 1024 tile bytes")
+    runs: list[list[int]] = []
+    for tile in tiles:
+        if tile > 5:
+            raise ProtocolError("unknown terrain tile")
+        if runs and runs[-1][1] == tile:
+            runs[-1][0] += 1
+        else:
+            runs.append([1, tile])
+    return runs

@@ -55,13 +55,14 @@ class Connection:
                 continue
             # Intents are validated but intentionally have no gameplay effects.
 
-    async def run(self, tick: int) -> None:
+    async def run(self, tick: int, *, world_size: int, chunk_size: int, seed: int) -> None:
         await self.websocket.accept()
         self.registry.register(self)
         try:
             await self.send({
                 "t": "welcome", "v": SCHEMA_VERSION, "entity_id": self.id, "tick": tick,
-                "config": {"movement_hz": 10, "sim_hz": 1, "aoi_radius": 32},
+                "world_size": world_size, "chunk_size": chunk_size, "seed": seed,
+                "config": {"movement_hz": 10, "sim_hz": 1, "aoi_radius": 20},
             })
             async with asyncio.TaskGroup() as group:
                 group.create_task(self._send_loop())
