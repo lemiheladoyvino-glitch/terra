@@ -3,8 +3,10 @@ from __future__ import annotations
 import math
 import random
 from dataclasses import dataclass, field, replace
+from typing import Any
 
 from server.game.entities import Entity, Position
+from server.game.village import Village, seed_villages
 from server.game.worldgen import Terrain, TerrainKind, generate_island
 
 BUCKET_SIZE = 16
@@ -15,6 +17,7 @@ class World:
     terrain: Terrain
     entities: dict[str, Entity] = field(default_factory=dict, init=False)
     tick_count: int = 0
+    villages: list[Village] = field(default_factory=list)
     _buckets: dict[tuple[int, int], set[str]] = field(default_factory=dict, init=False, repr=False)
 
     @staticmethod
@@ -42,6 +45,11 @@ class World:
         entity = replace(self.entities[id], position=new_pos)
         self.remove_entity(id)
         self.add_entity(entity)
+
+    def update_entity_fields(self, id: str, **fields: Any) -> None:
+        """Replace kind fields without changing position or spatial membership."""
+        entity = self.entities[id]
+        self.entities[id] = replace(entity, fields={**entity.fields, **fields})
 
     def query_radius(self, center: Position, radius: float) -> list[Entity]:
         """Inclusive circular query, sorted by ID for deterministic results.
@@ -90,4 +98,5 @@ class World:
                     continue
                 world.add_entity(Entity(f"{kind}:{x}:{y}", kind, (x + 0.5, y + 0.5),
                                         {"resource_remaining": remaining}))
+        seed_villages(world)
         return world
