@@ -5,7 +5,7 @@ import math
 from enum import StrEnum
 from typing import Any
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 CHUNK_SIZE = 32
 MAX_MESSAGE_BYTES = 65_536
 
@@ -54,7 +54,7 @@ SCHEMAS: dict[str, Any] = {
     },
     "craft": {"recipe_id": "id"},
     "chat": ({"text": "text"}, {"text": "text", "sender_id": "id", "tick": "uint"}),
-    "welcome": {"entity_id": "id", "tick": "uint", "config": CONFIG,
+    "welcome": {"token": "id", "entity_id": "id", "tick": "uint", "config": CONFIG,
                 "world_size": "positive_int", "chunk_size": "chunk_size", "seed": "int"},
     "chunk": {"cx": "int", "cy": "int", "size": "chunk_size", "tiles": "rle"},
     "snapshot": {"tick": "uint", "entities": ["entity"]},

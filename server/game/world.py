@@ -6,6 +6,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 from server.game.entities import Entity, Position
+from server.game.survival import ItemStack
 from server.game.village import Village, seed_villages
 from server.game.worldgen import Terrain, TerrainKind, generate_island
 
@@ -18,6 +19,7 @@ class World:
     entities: dict[str, Entity] = field(default_factory=dict, init=False)
     tick_count: int = 0
     villages: list[Village] = field(default_factory=list)
+    grave_contents: dict[str, list[ItemStack]] = field(default_factory=dict)
     _buckets: dict[tuple[int, int], set[str]] = field(default_factory=dict, init=False, repr=False)
 
     @staticmethod

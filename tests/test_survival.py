@@ -255,8 +255,8 @@ def test_latest_interact_is_queued() -> None:
     class Socket:
         def __init__(self) -> None:
             self.messages = iter([
-                {"t": "interact", "v": 3, "action": "chop", "target": {"entity_id": "a"}},
-                {"t": "interact", "v": 3, "action": "mine", "target": {"entity_id": "b"}},
+                {"t": "interact", "v": 4, "action": "chop", "target": {"entity_id": "a"}},
+                {"t": "interact", "v": 4, "action": "mine", "target": {"entity_id": "b"}},
             ])
 
         async def receive_text(self) -> str:
@@ -294,13 +294,13 @@ def test_vitals_owner_only_and_send_on_change(setup: tuple[Simulation, Connectio
     sim.add_player(other)
     sim.registry.register(other)
     sim.send_vitals(connection)
-    assert drain(connection) == [{"t": "vitals", "v": 3, "hp": 100, "hunger": 100}]
+    assert drain(connection) == [{"t": "vitals", "v": 4, "hp": 100, "hunger": 100}]
     assert drain(other) == []
     sim.send_vitals(connection)
     assert drain(connection) == []
     sim._survival_tick()
-    assert drain(connection) == [{"t": "vitals", "v": 3, "hp": 100, "hunger": 99}]
-    assert drain(other) == [{"t": "vitals", "v": 3, "hp": 100, "hunger": 99}]
+    assert drain(connection) == [{"t": "vitals", "v": 4, "hp": 100, "hunger": 99}]
+    assert drain(other) == [{"t": "vitals", "v": 4, "hp": 100, "hunger": 99}]
     sim.send_vitals(connection)
     assert drain(connection) == []
     resource(sim, "berry-bush")
@@ -311,7 +311,7 @@ def test_vitals_owner_only_and_send_on_change(setup: tuple[Simulation, Connectio
     sim.players[connection.id].hp = 0
     sim.players[connection.id].hunger = 0
     sim._survival_tick()
-    assert drain(connection)[-1] == {"t": "vitals", "v": 3, "hp": 100, "hunger": 100}
+    assert drain(connection)[-1] == {"t": "vitals", "v": 4, "hp": 100, "hunger": 100}
     sim.remove_player(connection)
     assert connection.id not in sim.last_vitals
 

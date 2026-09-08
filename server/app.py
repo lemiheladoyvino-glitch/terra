@@ -60,7 +60,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     app.state.save_world = save_current
     app.state.registry = ConnectionRegistry()
-    app.state.simulation = Simulation(app.state.world, app.state.registry)
+    app.state.simulation = Simulation(app.state.world, app.state.registry, db_path)
     app.state.loop = GameLoop(
         on_movement_tick=app.state.simulation.movement_tick,
         on_sim_tick=app.state.simulation.sim_tick,
@@ -75,6 +75,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         finally:
             stop_saving.set()
             await save_task  # Wait for an in-flight write; never overlap the final save.
+            await app.state.simulation.flush_player_saves()
             await save_current()
 
 
@@ -96,17 +97,22 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         app.state.simulation.send_inventory(connection)
         app.state.simulation.send_vitals(connection)
 
-    try:
+    def on_connect() -> int:
         app.state.simulation.add_player(connection)
+        return world.tick_count
+
+    try:
         await connection.run(
             world.tick_count,
             world_size=world.terrain.size,
             chunk_size=CHUNK_SIZE,
             seed=world.terrain.seed,
             on_welcome=on_welcome,
+            on_connect=on_connect,
         )
     finally:
         app.state.simulation.remove_player(connection)
+        await app.state.simulation.flush_player_saves()
 
 
 

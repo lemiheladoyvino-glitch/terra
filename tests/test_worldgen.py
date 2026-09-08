@@ -137,7 +137,7 @@ def test_all_entity_records(kind: str) -> None:
     values = {"text": "Ada", "uint": 1, "id": "example"}
     entity = Entity("e1", kind, (1.5, 2.5),
                     {key: values[schema] for key, schema in KINDS[kind].items()})
-    message = {"t": "snapshot", "v": 3, "tick": 0, "entities": [entity.to_record()]}
+    message = {"t": "snapshot", "v": 4, "tick": 0, "entities": [entity.to_record()]}
     assert decode(encode(message)) == message
 
 

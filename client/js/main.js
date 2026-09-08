@@ -46,6 +46,10 @@ function boot() {
         overlay.hidden = this.connected;
         // Keep the reconnect wording visible throughout subsequent attempts.
         if (status === "disconnected") overlayMessage.textContent = "Disconnected — reconnecting";
+        if (status === "replaced") {
+          statusElement.textContent = "Session opened elsewhere";
+          overlayMessage.textContent = "Session opened elsewhere — reload to resume here";
+        }
       }, () => {
         this.world.reset();
         this.survivalUI.reset();

@@ -9,6 +9,8 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from server.net.protocol import SCHEMA_VERSION, ProtocolError, decode, encode
 
+HELLO_TIMEOUT = 0.5
+
 CLIENT_TYPES = {"hello", "move", "interact", "craft", "chat"}
 
 
@@ -20,12 +22,15 @@ class ConnectionRegistry:
         self.connections[connection.id] = connection
 
     def unregister(self, connection: Connection) -> None:
-        self.connections.pop(connection.id, None)
+        if self.connections.get(connection.id) is connection:
+            self.connections.pop(connection.id, None)
 
 
 class Connection:
     def __init__(self, websocket: WebSocket, registry: ConnectionRegistry) -> None:
         self.id = str(uuid4())
+        self.hello_token: str | None = None
+        self.token = str(uuid4())
         self.websocket = websocket
         self.registry = registry
         self.send_queue: asyncio.Queue[str] = asyncio.Queue(maxsize=64)
@@ -38,13 +43,15 @@ class Connection:
         self.bootstrapped = False
         self.closing = False
         self._close_code = 1000
+        self._close_reason = ""
         self._close_requested = asyncio.Event()
 
-    def close_soon(self, code: int) -> None:
+    def close_soon(self, code: int, reason: str = "") -> None:
         """Wake the TaskGroup-owned close watcher without blocking the tick."""
         if not self.closing:
             self.closing = True
             self._close_code = code
+            self._close_reason = reason
             self._close_requested.set()
 
     async def _watch_close(self) -> None:
@@ -59,46 +66,87 @@ class Connection:
         while True:
             await self.websocket.send_text(await self.send_queue.get())
 
+    async def _read_message(self) -> dict[str, Any]:
+        try:
+            raw = await self.websocket.receive_text()
+        except KeyError as exc:
+            raise ProtocolError("expected text frame") from exc
+        message = decode(raw)
+        if message["t"] not in CLIENT_TYPES or "sender_id" in message:
+            raise ProtocolError("message is not a client intent")
+        return message
+
+    def _handle_intent(self, message: dict[str, Any]) -> None:
+        if message["t"] == "hello":
+            raise ProtocolError("hello must be the first message")
+        if message["t"] == "move":
+            direction = message.get("direction")
+            self.move_intent = None if direction == {"x": 0, "y": 0} else message
+        elif message["t"] == "interact":
+            self.interact_intent = message
+        elif message["t"] == "craft":
+            self.craft_intent = message
+
+    async def _invalid_message(self, error: ProtocolError) -> None:
+        await self.send(
+            {
+                "t": "error",
+                "v": SCHEMA_VERSION,
+                "code": "invalid_message",
+                "message": str(error)[:2048],
+            }
+        )
+
     async def _recv_loop(self) -> None:
         while True:
             try:
-                try:
-                    raw = await self.websocket.receive_text()
-                except KeyError as exc:
-                    # Starlette's receive_text accesses a missing text key on binary frames.
-                    raise ProtocolError("expected text frame") from exc
-                message = decode(raw)
-                if message["t"] not in CLIENT_TYPES or "sender_id" in message:
-                    raise ProtocolError("message is not a client intent")
+                self._handle_intent(await self._read_message())
             except ProtocolError as exc:
-                await self.send({
-                    "t": "error", "v": SCHEMA_VERSION,
-                    "code": "invalid_message", "message": str(exc)[:2048],
-                })
-                continue
-            if message["t"] == "move":
-                direction = message.get("direction")
-                self.move_intent = None if direction == {"x": 0, "y": 0} else message
-            elif message["t"] == "interact":
-                self.interact_intent = message
-            elif message["t"] == "craft":
-                self.craft_intent = message
-            # Other valid intents have no gameplay effects yet.
+                await self._invalid_message(exc)
 
     async def run(
-        self, tick: int, *, world_size: int, chunk_size: int, seed: int,
+        self,
+        tick: int,
+        *,
+        world_size: int,
+        chunk_size: int,
+        seed: int,
         on_welcome: Callable[[], None] | None = None,
+        on_connect: Callable[[], int] | None = None,
     ) -> None:
-        # The endpoint accepts and adds the player before calling run.
-        self.registry.register(self)
+        # Endpoint accepts first; identity is established before registry/welcome.
         try:
-            await self.send({
-                "t": "welcome", "v": SCHEMA_VERSION, "entity_id": self.id, "tick": tick,
-                "world_size": world_size, "chunk_size": chunk_size, "seed": seed,
-                "config": {"movement_hz": 10, "sim_hz": 1, "aoi_radius": self.aoi_radius},
-            })
+            first_error = None
+            try:
+                first = await asyncio.wait_for(self._read_message(), timeout=HELLO_TIMEOUT)
+                if first["t"] == "hello":
+                    self.hello_token = first["token"]
+                else:
+                    self._handle_intent(first)
+            except TimeoutError:
+                pass
+            except ProtocolError as exc:
+                first_error = exc
+            if on_connect is not None:
+                tick = on_connect()
+            self.registry.register(self)
+            await self.send(
+                {
+                    "t": "welcome",
+                    "v": SCHEMA_VERSION,
+                    "entity_id": self.id,
+                    "tick": tick,
+                    "token": self.token,
+                    "world_size": world_size,
+                    "chunk_size": chunk_size,
+                    "seed": seed,
+                    "config": {"movement_hz": 10, "sim_hz": 1, "aoi_radius": self.aoi_radius},
+                }
+            )
             if on_welcome is not None:
                 on_welcome()
+            if first_error is not None:
+                await self._invalid_message(first_error)
             async with asyncio.TaskGroup() as group:
                 group.create_task(self._send_loop())
                 group.create_task(self._watch_close())
@@ -108,6 +156,9 @@ class Connection:
         finally:
             try:
                 if self.closing:
-                    await self.websocket.close(code=self._close_code)
+                    if self._close_reason:
+                        await self.websocket.close(code=self._close_code, reason=self._close_reason)
+                    else:
+                        await self.websocket.close(code=self._close_code)
             finally:
                 self.registry.unregister(self)

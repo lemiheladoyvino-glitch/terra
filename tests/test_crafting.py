@@ -192,7 +192,7 @@ def test_latest_craft_is_queued_and_removed(
             recipe = next(self.recipes, None)
             if recipe is None:
                 raise WebSocketDisconnect()
-            return encode({"t": "craft", "v": 3, "recipe_id": recipe})
+            return encode({"t": "craft", "v": 4, "recipe_id": recipe})
 
     connection.websocket = Socket()
 

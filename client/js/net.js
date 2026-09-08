@@ -12,6 +12,7 @@ export class Network {
     this.welcome = null;
     this.lastDirection = null;
     this.stopped = false;
+    this.token = null;
   }
 
   connect() {
@@ -27,6 +28,12 @@ export class Network {
       return;
     }
     this.socket = socket;
+    socket.addEventListener("open", () => {
+      if (socket !== this.socket || this.stopped) return;
+      let token = this.token;
+      try { token = localStorage.getItem("terra.token") || token; } catch { /* Session fallback. */ }
+      if (token) socket.send(JSON.stringify({ t: "hello", v: SCHEMA_VERSION, token }));
+    });
     socket.addEventListener("message", ({ data }) => {
       if (socket !== this.socket || this.stopped) return;
       let message;
@@ -39,6 +46,8 @@ export class Network {
       if (!message || message.v !== SCHEMA_VERSION || !INBOUND.has(message.t)) return;
       try {
         if (message.t === "welcome") {
+          this.token = message.token;
+          try { localStorage.setItem("terra.token", message.token); } catch { /* Private mode. */ }
           this.welcome = {
             entityId: message.entity_id,
             worldSize: message.world_size,
@@ -58,9 +67,17 @@ export class Network {
     socket.addEventListener("error", () => {
       if (socket === this.socket) socket.close();
     });
-    socket.addEventListener("close", () => {
+    socket.addEventListener("close", (event = {}) => {
       if (socket !== this.socket) return;
       this.socket = null;
+      if (event.code === 1000 && event.reason === "session replaced") {
+        this.stopped = true;
+        this.welcome = null;
+        this.lastDirection = null;
+        this.onReset();
+        this.onStatus("replaced");
+        return;
+      }
       this.retry();
     });
   }

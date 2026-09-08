@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 export const TILE_PX = 24;
 export const CHUNK_SIZE = 32;
 export const MOVE_SPEED = 4.0;

@@ -32,12 +32,12 @@ is only needed for the RLE unit test.
 
 Run from the repo root. One uvicorn process is one world; do not use multiple
 workers. Restart resumes the last saved world; a new database starts a seed-42 island.
-There is no auth or persistent player session yet. Connections create players at a shared deterministic spawn;
-disconnect removes them. The 10 Hz hook integrates movement and streams terrain
+Players resume with a durable bearer token stored in browser localStorage. Connections create players at a shared deterministic spawn;
+disconnect removes the live entity and saves the player. The 10 Hz hook integrates movement and streams terrain
 chunks plus AOI snapshots/deltas; the 1 Hz hook is reserved for future simulation.
 Non-movement intents are validated and ignored. The browser caches terrain chunks,
 interpolates remote entities by 200 ms, and predicts local movement. Disconnection
-clears client state and retries every second with a new player.
+clears client state and retries every second with the saved player token.
 
 The loop runs independently of connections, starts with app lifespan, and stops on
 shutdown. Delayed scheduling catches up every tick. Simulation sends never block:
@@ -94,7 +94,7 @@ stops the loop, waits for an active save, then writes one final snapshot. Mappin
 JSON encoding, and gzip compression run on the event loop; only SQLite I/O runs
 in a worker thread. Saves share a lock and use one atomic row transaction.
 
-Snapshot version 1 is independent of WebSocket schema 3. There are no migrations
+World snapshot version 1 and player snapshot version 1 are independent of WebSocket schema 4. There are no migrations
 yet: incompatible versions or corrupt snapshots quarantine the original database
 as `<filename>.corrupt-<UTC timestamp>`, log an error, and start a fresh world.
 Terrain is regenerated from the seed at the fixed MVP size of 192 tiles. Changing
@@ -103,6 +103,11 @@ the generator requires a snapshot version bump or a future migration.
 Village buildings reference entity IDs; workers retain every FSM field. The
 `_sites` search cursor is deliberately omitted and restarted lazily on load, so
 an in-progress expansion search can take a different number of ticks to finish.
-Connection-owned player inventories/vitals and grave contents are not part of
-this world-only snapshot; account/session persistence is a later task. Entity
-records themselves are preserved, including player/grave records in a crash snapshot.
+Player inventory, HP, hunger, name, stable ID, and position are saved in compressed
+`player:<token>` rows on disconnect and when changed every ten survival ticks.
+SQLite writes run in a worker, serialized by a player-save lock; shutdown drains
+pending saves. Corrupt player rows are preserved under `corrupt-player:<uuid>`
+without quarantining the world database or logging the token. Grave contents are
+now an optional field in world snapshots; existing version-1 worlds still load.
+Player entities from crash snapshots are removed until their owners reconnect.
+World and player saves are separate transactions, not an atomic cross-row checkpoint.

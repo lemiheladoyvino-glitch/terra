@@ -10,8 +10,10 @@ from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from uuid import uuid4
 
 from server.game.entities import Entity
+from server.game.players import StoredPlayer, validate_player
 from server.game.village import State, Village, Villager
 from server.game.worldgen import generate_island
 
@@ -29,6 +31,7 @@ def world_to_dict(world: World) -> dict[str, Any]:
             "version": SNAPSHOT_VERSION,
             "seed": world.terrain.seed,
             "tick_count": world.tick_count,
+            "grave_contents": world.grave_contents,
             "entities": [
                 {"id": e.id, "kind": e.kind, "position": list(e.position), "fields": e.fields}
                 for e in world.entities.values()
@@ -73,6 +76,7 @@ def world_from_dict(data: dict[str, Any]) -> World:
         raise ValueError("invalid tick count")
     world = World(generate_island(data["seed"]))
     world.tick_count = data["tick_count"]
+    world.grave_contents = deepcopy(data.get("grave_contents", {}))
     for record in data["entities"]:
         world.add_entity(
             Entity(
@@ -181,3 +185,60 @@ def load_world(db_path: str | Path) -> dict[str, Any] | None:
     ) as exc:
         _quarantine(path, exc)
         return None
+
+
+PLAYER_SNAPSHOT_VERSION = 1
+
+
+def save_player(db_path: str | Path, stored: StoredPlayer) -> None:
+    data = validate_player(stored)
+    blob = gzip.compress(
+        json.dumps(
+            {"version": PLAYER_SNAPSHOT_VERSION, "player": data},
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode(),
+        mtime=0,
+    )
+    with closing(sqlite3.connect(db_path)) as db, db:
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS kv "
+            "(key TEXT PRIMARY KEY, value BLOB NOT NULL, updated_at TEXT NOT NULL)"
+        )
+        db.execute(
+            "INSERT OR REPLACE INTO kv VALUES (?, ?, ?)",
+            (f"player:{data['token']}", blob, datetime.now(UTC).isoformat()),
+        )
+
+
+def load_player(db_path: str | Path, token: str) -> StoredPlayer | None:
+    if not Path(db_path).exists():
+        return None
+    with closing(sqlite3.connect(db_path)) as db, db:
+        if not db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='kv'"
+        ).fetchone():
+            return None
+        key = f"player:{token}"
+        row = db.execute("SELECT value FROM kv WHERE key=?", (key,)).fetchone()
+        if row is None:
+            return None
+        try:
+            envelope = json.loads(gzip.decompress(row[0]))
+            if (
+                type(envelope["version"]) is not int
+                or envelope["version"] != PLAYER_SNAPSHOT_VERSION
+            ):
+                raise ValueError("unsupported player version")
+            data = validate_player(envelope["player"])
+            if data["token"] != token:
+                raise ValueError("player token mismatch")
+            return data
+        except (ValueError, TypeError, KeyError, OverflowError, OSError, EOFError, zlib.error):
+            # Preserve the blob under a non-credential key; never log its contents/token.
+            quarantine = f"corrupt-player:{uuid4()}"
+            db.execute("UPDATE kv SET key=? WHERE key=?", (quarantine, key))
+            logger.error(
+                "Corrupt player row quarantined as %s; treating token as unknown", quarantine
+            )
+            return None
