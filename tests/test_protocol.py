@@ -84,7 +84,8 @@ def test_entity_kinds(kind: str) -> None:
     assert decode(encode(message)) == message
 
 
-def test_app_transport_and_cleanup() -> None:
+def test_app_transport_and_cleanup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TERRA_DB", str(tmp_path / "transport.db"))
     with TestClient(app) as client:
         assert client.get("/healthz").json() == {"status": "ok"}
         assert "phaser@3.90.0" in client.get("/").text

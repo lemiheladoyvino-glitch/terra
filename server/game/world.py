@@ -71,6 +71,12 @@ class World:
                 + (self.entities[id].position[1] - y) ** 2 <= radius * radius]
 
     @classmethod
+    def from_snapshot(cls, data: dict[str, Any]) -> World:
+        from server.game.persistence import world_from_dict
+
+        return world_from_dict(data)
+
+    @classmethod
     def new(cls, seed: int) -> World:
         world = cls(generate_island(seed))
         rng = random.Random(seed)

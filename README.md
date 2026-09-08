@@ -31,8 +31,8 @@ The client uses plain ES modules without a build step or npm dependencies. Node.
 is only needed for the RLE unit test.
 
 Run from the repo root. One uvicorn process is one world; do not use multiple
-workers. Reload regenerates the seed-42 island and resources. There is no database,
-auth, or persistence. Connections create players at a shared deterministic spawn;
+workers. Restart resumes the last saved world; a new database starts a seed-42 island.
+There is no auth or persistent player session yet. Connections create players at a shared deterministic spawn;
 disconnect removes them. The 10 Hz hook integrates movement and streams terrain
 chunks plus AOI snapshots/deltas; the 1 Hz hook is reserved for future simulation.
 Non-movement intents are validated and ignored. The browser caches terrain chunks,
@@ -84,3 +84,25 @@ terra/
   pyproject.toml
   .gitignore
 ```
+
+## World persistence
+
+`TERRA_DB` selects the SQLite file (default `./terra.db`). New worlds use seed 42;
+existing snapshots restore their own seed, tick, entities, and villages without
+resource or village reseeding. Autosave runs every 30 seconds; graceful shutdown
+stops the loop, waits for an active save, then writes one final snapshot. Mapping,
+JSON encoding, and gzip compression run on the event loop; only SQLite I/O runs
+in a worker thread. Saves share a lock and use one atomic row transaction.
+
+Snapshot version 1 is independent of WebSocket schema 3. There are no migrations
+yet: incompatible versions or corrupt snapshots quarantine the original database
+as `<filename>.corrupt-<UTC timestamp>`, log an error, and start a fresh world.
+Terrain is regenerated from the seed at the fixed MVP size of 192 tiles. Changing
+the generator requires a snapshot version bump or a future migration.
+
+Village buildings reference entity IDs; workers retain every FSM field. The
+`_sites` search cursor is deliberately omitted and restarted lazily on load, so
+an in-progress expansion search can take a different number of ticks to finish.
+Connection-owned player inventories/vitals and grave contents are not part of
+this world-only snapshot; account/session persistence is a later task. Entity
+records themselves are preserved, including player/grave records in a crash snapshot.
